@@ -157,7 +157,7 @@ for cnt in filtered_contours:
             curvature_radius = (1 + dx ** 2) ** (3 / 2) / np.abs(ddx)
 
             # 找到曲率最小的点
-            min_curvature_idx = np.argmin(curvature_radius)
+            min_curvature_idx = np.argmax(curvature_radius)
             min_curvature_x = trimmed_x_fitted[min_curvature_idx]
             min_curvature_y = trimmed_y_fitted[min_curvature_idx]
             min_curvature_value = curvature_radius[min_curvature_idx]
@@ -230,7 +230,7 @@ ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 ax.axis("off")
 ax.plot([], [], 'g-', linewidth=3, label="拟合骨架")
 ax.plot([], [], 'y-', linewidth=3, label="拟合曲线")
-ax.plot([], [], 'rx', markersize=10, label="最小曲率点")
+ax.plot([], [], 'rx', markersize=10, label="最大曲率点")
 ax.legend()
 
 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
