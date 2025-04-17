@@ -2,10 +2,11 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
+from scipy.interpolate import splprep, splev
 
 plt.rcParams['font.family']='Times New Roman ,SimSun '# 设置字体族，中文为SimSun，英文为Times New Roman
 # 可调整参数
-WINDOW_SIZE = 200  # 滑动窗口大小
+WINDOW_SIZE = 600  # 滑动窗口大小
 CLAHE_CLIP_LIMIT = 2.0  # CLAHE 对比度限制
 CLAHE_GRID_SIZE = (8, 8)  # CLAHE 网格大小
 MORPH_KERNEL_SIZE = (10, 10)  # 形态学开运算核大小
@@ -103,43 +104,47 @@ def filter_skeleton(skeleton_binary):
 
 
 def fit_curves(final_skeleton, image):
-    """对骨架拟合曲线并计算曲率"""
+    """ 使用 B 样条平滑骨架曲线并计算曲率 """
     contours, _ = cv2.findContours(final_skeleton, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     max_curvature_points = []
 
     for cnt in contours:
         points = cnt[:, 0, :]
+        if len(points) < 5:  # 过少点无法平滑
+            continue
+
+        # 提取 x, y 坐标
         x_vals, y_vals = points[:, 0], points[:, 1]
 
-        if len(x_vals) > 3:
-            coefficients = np.polyfit(x_vals, y_vals, 2)
-            poly_func = np.poly1d(coefficients)
+        # B 样条拟合
+        tck, u = splprep([x_vals, y_vals], s=10)  # s 控制平滑度，值越大越光滑
+        u_fine = np.linspace(0, 1, 100)  # 生成均匀间隔的参数
+        x_smooth, y_smooth = splev(u_fine, tck)
 
-            y_predicted = poly_func(x_vals)
-            mse = np.mean((y_vals - y_predicted) ** 2)
+        # 计算一阶导数（dx/ds, dy/ds）
+        dx, dy = splev(u_fine, tck, der=1)
 
-            if mse < CURVATURE_ERROR_THRESHOLD:
-                if cnt is not None:
-                    for point in cnt:
-                        x, y = point[0]
-                        cv2.circle(image, (x, y), radius=1, color=(0, 255, 0), thickness=5)
-                    
-                x_fitted = np.linspace(min(x_vals), max(x_vals), 100).astype(int)
-                y_fitted = poly_func(x_fitted).astype(int)
+        # 计算二阶导数（d²x/ds², d²y/ds²）
+        ddx, ddy = splev(u_fine, tck, der=2)
 
-                trimmed_x_fitted, trimmed_y_fitted = x_fitted[10:-10], y_fitted[10:-10]
-                dx = np.polyder(poly_func, 1)(trimmed_x_fitted)
-                ddx = np.polyder(poly_func, 2)(trimmed_x_fitted)
-                ddx[ddx == 0] = 1e-6
+        # 计算曲率 k = (dx * ddy - dy * ddx) / (dx² + dy²)^(3/2)
+        denominator = (dx**2 + dy**2) ** (3/2)
+        denominator[denominator == 0] = 1e-6  # 避免除零
+        curvature = np.abs(dx * ddy - dy * ddx) / denominator
 
-                curvature_radius = (1 + dx ** 2) ** (3 / 2) / np.abs(ddx)
-                max_curvature_idx = np.argmax(curvature_radius)
-                max_curvature_x, max_curvature_y = trimmed_x_fitted[max_curvature_idx], trimmed_y_fitted[max_curvature_idx]
-                max_curvature_value = curvature_radius[max_curvature_idx]
+        # 找到最大曲率点
+        max_curvature_idx = np.argmax(curvature)
+        max_curvature_x, max_curvature_y = int(x_smooth[max_curvature_idx]), int(y_smooth[max_curvature_idx])
+        max_curvature_value = curvature[max_curvature_idx]
 
-                max_curvature_points.append((max_curvature_x, max_curvature_y, max_curvature_value))
-                cv2.polylines(image, [np.array(list(zip(x_fitted, y_fitted)))], isClosed=False, color=(0, 255, 255), thickness=3)
-                print(max_curvature_points)
+        # 记录最大曲率点
+        max_curvature_points.append((max_curvature_x, max_curvature_y, max_curvature_value))
+
+        # 绘制平滑后的曲线
+        for i in range(len(x_smooth) - 1):
+            cv2.line(image, (int(x_smooth[i]), int(y_smooth[i])), 
+                    (int(x_smooth[i+1]), int(y_smooth[i+1])), (0, 255, 255), 2)
+
     return max(max_curvature_points, key=lambda p: p[2]) if max_curvature_points else None
 
 
